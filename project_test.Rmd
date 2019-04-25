@@ -1,0 +1,273 @@
+---
+title: "OCR with Sentiment Analysis"
+author: "Dhananjay"
+date: "16 April 2019"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r loadpackages, warning=FALSE, message=FALSE}
+
+library(tesseract) #for OCR can read image,pdf and 
+library(tidyverse)
+library(tm)
+library(tidytext)
+library(SnowballC)
+library(magick) #for image preprocessing
+library(wordcloud)
+library(rpart)
+library(reshape2)
+library(rpart.plot)
+#library(e1071)
+#library(nnet)
+library(stringr)
+library(tokenizers)
+library(pdftools)
+library(textreadr)
+library(rmarkdown)
+library(knitr)
+library(markdown)
+```
+
+
+```{r tessearact_info}
+tesseract_info()
+
+```
+
+```{r funtion text mining}
+
+lis <- function(let_data){
+  vec=c()
+  for (i in seq(1,length(let_data[[1]]))){
+    k = tokenize_lines(let_data[[1]][i], simplify = FALSE)
+    vec=c(vec,k)
+  }
+  vec
+  
+}
+
+tminig <- function(vec){
+  # Convert sentences into a Corpus
+  corp <- Corpus(VectorSource(vec))
+  
+  # Compute Term Frequency
+  tdm1 <- TermDocumentMatrix(corp)
+  inspect(tdm1)
+  
+  ## Tokenization (may or may not need it)
+  corp2 <- tm_map(corp, stripWhitespace) 
+  corp3 <- tm_map(corp2, removePunctuation)
+  
+  corp4 <- tm_map(corp3, removeWords, stopwords("en"))
+  
+  ## Stemming
+  corp5 <- tm_map(corp4, stemDocument) 
+  
+  tdm2 <- TermDocumentMatrix(corp5)
+  inspect(tdm2)
+  
+  ## Term Frequency - Inverse Document Frequency
+  tfidf <- weightTfIdf(tdm2)
+  inspect(tfidf)
+  
+  dtm <- DocumentTermMatrix(corp5)
+  inspect(dtm)
+  
+  findFreqTerms(dtm, 4)
+  
+  dtm_tfidf <- DocumentTermMatrix(corp5, control = list(weighting = weightTfIdf))
+  dtm_tfidf = removeSparseTerms(dtm_tfidf, 0.95)
+  dtm_tfidf
+  
+  freq = data.frame(sort(colSums(as.matrix(dtm_tfidf)), decreasing=TRUE))
+  wordcloud(rownames(freq), freq[,1], max.words=100, colors=brewer.pal(1, "Dark2"))
+  
+}
+
+
+
+```
+
+```{r Function sentiment analysis}
+tidy_senal <-function(data){
+  
+  # Tokenize the data
+  tidy_data <- data %>% unnest_tokens(word, text)
+  tidy_data
+  
+  # Delete stop-words
+  tidy_data %>% anti_join(stop_words) %>% 
+    count(word, sort= TRUE)
+  
+  sentiments
+  #diffrent type of sentiment lexicons
+  get_sentiments("nrc")  
+  get_sentiments("afinn")
+  get_sentiments("bing")
+  
+  tidy_data %>% count(word, sort = TRUE)
+  
+  print(
+    tidy_data %>%  
+    anti_join(stop_words) %>% 
+    count(word, sort = TRUE) %>%
+    filter(n > 50) %>%
+    mutate(word = reorder(word, n)) %>%
+    ggplot(aes(word, n)) +
+    geom_col(fill = "steelblue", width = 0.5) +
+    xlab(NULL) +
+    coord_flip()
+    )
+  
+  
+  # positive sentiments
+  nrc_joy <- get_sentiments("nrc") %>%
+    filter(sentiment == "joy")
+  
+  tidy_data %>%
+    inner_join(nrc_joy) %>%
+    count(word, sort = TRUE)
+  
+  # Most common positive and negative words
+  bing_word_counts <- tidy_data %>%
+    inner_join(get_sentiments("bing")) %>%
+    count(word, sentiment, sort = TRUE) %>%
+    ungroup()
+  
+  bing_word_counts
+  
+  print(
+    bing_word_counts %>%
+    group_by(sentiment) %>%
+    top_n(10) %>%
+    ungroup() %>%
+    mutate(word = reorder(word, n)) %>%
+    ggplot(aes(word, n, fill = sentiment)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~sentiment, scales = "free_y") +
+    labs(y = "Contribution to sentiment",
+         x = NULL) +
+    coord_flip()
+  )
+  
+  # Wordclouds
+  
+  tidy_data %>%
+    anti_join(stop_words) %>%
+    count(word) %>%
+    with(wordcloud(word, n, max.words = 100))
+  
+  
+  tidy_data  %>%
+    inner_join(get_sentiments("bing")) %>%
+    count(word, sentiment, sort = TRUE) %>%
+    acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+    comparison.cloud(colors = c("orange3", "blue2"),
+                     max.words = 100)
+  
+  
+  
+  # Implement sentiment analysis using NRC lexicon
+  data_sentiment <- tidy_data %>%
+    #Define a new column: station_total
+    mutate(senti = n()) %>%
+    inner_join(get_sentiments("nrc"))
+  
+  
+  # Which words are driving sentiment scores?
+  data_sentiment %>%
+    count(word, sentiment) %>%
+    group_by(sentiment) %>%
+    # Top 10 words for each sentiment
+    top_n(10) %>%
+    ungroup() %>%
+    mutate(word = reorder(word, n)) %>%
+    #plot
+    ggplot(aes(x= word, y = n, fill = sentiment)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~ sentiment, scales = "free") +
+    coord_flip()
+}
+
+```
+
+```{r Text_Extraction_Image}
+let1 <- ocr("let1.png", engine = tesseract("eng"))
+let2 =ocr("let2.png", engine = tesseract("eng"))
+
+let3 = paste(let1, let2)
+let3 = as.String(let3)
+let3 = strsplit(let3,"\n")
+
+let3
+
+vec=c()
+for (i in seq(1,length(let3[[1]]))){
+  k = tokenize_lines(let3[[1]][i], simplify = FALSE)
+  vec=c(vec,k)
+}
+vec
+```
+
+```{r Text_Mining_Image}
+tminig(vec)
+```
+
+```{r Text_Extraction_PDF_knock_knock}
+knock <- pdftools::pdf_convert("knock_knock.pdf", format = 'tiff',  dpi = 600)
+knock_text <- ocr(knock)
+print(knock_text)
+
+knock_text1 <- knock_text
+kt <- as.data.frame(knock_text1)
+
+#rename
+names(kt) <- c("text")
+#transform(kt, text = as.String(text))
+kt$text = as.String(kt$text)
+
+# tminig(knock_text)
+# tidy_senal(kt)
+
+```
+
+```{r Text_Mining_PDF_knock_knock}
+tminig(knock_text)
+```
+
+```{r Sentiment_Analysis_knock_knock}
+tidy_senal(kt)
+```
+
+```{r Text_Extraction_PDF_MAMTAJ}
+myjerk <- pdftools::pdf_convert("My Arranged Marriage To A Jerk.pdf", format = 'tiff',  dpi = 600)
+myjerk_text <- ocr(myjerk)
+print(myjerk_text)
+
+myjerk_text1 <- myjerk_text
+mj <- as.data.frame(myjerk_text1)
+
+#rename
+names(mj) <- c("text")
+#transform(kt, text = as.String(text))
+mj$text = as.String(mj$text)
+
+```
+
+```{r Text_Mining_PDF_MAMTAJ}
+tminig(myjerk_text)
+```
+
+```{r Sentiment_Analysis_PDF_MAMTAJ}
+tidy_senal(mj)
+```
+
